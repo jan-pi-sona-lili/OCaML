@@ -1,6 +1,6 @@
 (** OCaML - Machine Learning with OCaml. Uses the {{: https://nn.cs.utexas.edu/downloads/papers/stanley.ec02.pdf} NEAT } algorithm. *)
 
-module Network_parameter_types = struct
+module Parameter_types = struct
         type threshold_weights =
                 { excess       : float
                 ; disjoint     : float
@@ -20,57 +20,93 @@ module Network_parameter_types = struct
                 ; modify_connection : float
                 }
         (** How often a given mutation happens. *)
+
+
+        module type Userdata = sig
+                type t
+                val userdata : t -> float
+        end
+        (** Turns userdata about a network into its fitness. *)
 end 
 
-module type Userdata = sig
-        type t
-        val fitness : t -> float
+
+module Genotype = struct
+        type node =
+                { id   : int
+                ; kind : [ `Sensor | `Hidden | `Output ]
+                }
+
+        type connection =
+                { in_node  : int
+                ; out_node : int
+                ; weight   : float
+                ; enabled  : bool
+                ; innov    : int
+                }
+
+        type t = 
+                { nodes       : node list
+                ; connections : connection list
+                }
 end
 
-module Model : sig
-        type t
-        val make :
-                ?activation        : (float -> float) ->
-                threshold_weights  : Network_parameter_types.threshold_weights ->
-                network_dimensions : Network_parameter_types.network_dimensions ->
-                mutation_rates     : Network_parameter_types.mutation_rates ->
-                network_count      : int ->
-                userdata           : (module Userdata) -> 
-                unit -> 
-                t
-end = struct 
-        module type IN = sig
-                include Userdata
-                val activation         : float -> float 
-                val threshold_weights  : Network_parameter_types.threshold_weights
-                val network_dimensions : Network_parameter_types.network_dimensions
-                val mutation_rates     : Network_parameter_types.mutation_rates
-                val network_count      : int 
-                val fitness            : t -> float
-        end
-        module type OUT = sig
-        end
+module Phenotype = struct
+        module M = Map.Make(struct 
+                open Genotype
+                type t = node
+                let compare {id=id1;_} {id=id2;_} = Int.compare id1 id2
+        end)
 
-        type t = (module OUT)
-
-        module ModelF(M : IN) : OUT = M
-
-        let make
-                ?(activation=fun x -> Float.(1. /. (1. +. (exp @@ neg x))))
-                ~threshold_weights
-                ~network_dimensions
-                ~mutation_rates
-                ~network_count
-                ~userdata
-                ()
-        =
-                let module M = ModelF(struct 
-                        include (val userdata : Userdata)
-                        let activation = activation
-                        let threshold_weights = threshold_weights
-                        let network_dimensions = network_dimensions
-                        let mutation_rates = mutation_rates
-                        let network_count = network_count
-                        let fitness = fitness
-                end) in (module M : OUT)
+        let of_genotype Genotype.{nodes;connections} =
+                let open Genotype in
+                let rec aux set connections = function
+                | []   -> set
+                | ({id;_} as node)::nodes ->
+                                let yes, no = List.partition (fun {in_node;_} -> id = in_node) connections in
+                                aux (M.add node yes set) no nodes
+                in
+                aux M.empty connections nodes 
 end
+
+let a = Phenotype.of_genotype Genotype.
+        { nodes = 
+                [ 
+                        { id=1
+                        ; kind=`Sensor
+                        }
+                        ;
+
+                        { id=2
+                        ; kind=`Output
+                        }
+                        ;
+                ]
+        ;
+        connections = 
+                [
+                        { in_node=1
+                        ; out_node=4
+                        ; weight=0.5
+                        ; enabled=true
+                        ; innov=1 
+                        }
+                        ;
+                        
+                        { in_node=1
+                        ; out_node=2
+                        ; weight=0.5
+                        ; enabled=true
+                        ; innov=1 
+                        }
+                        ;
+
+                        { in_node=1 (* might need to fix? *)
+                        ; out_node=2
+                        ; weight=0.5
+                        ; enabled=true
+                        ; innov=1 
+                        }
+                ]
+        }
+
+let () = Phenotype.M.find Genotype.{id=1;kind=`Sensor} a |> List.iter Genotype.(fun {in_node;out_node;_} -> Printf.printf "in_node = %d; out_node = %d\n" in_node out_node)
